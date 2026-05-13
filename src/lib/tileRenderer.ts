@@ -101,15 +101,26 @@ function renderTile(
     const thingType = datIndex.get(item.clientId);
     if (!thingType) continue;
 
-    const spriteId = thingType.frameGroup.spriteIds[0];
-    if (!spriteId) continue;
+    const { width, height, layers, numPatternX, numPatternY, numPatternZ, animationPhases, spriteIds } = thingType.frameGroup;
+    // Sprites are laid out (h, w, layer, patternX, patternY, patternZ, anim) with anim innermost.
+    // For static rendering we use the first layer/pattern/animation of each (w, h) cell.
+    const perCell = layers * numPatternX * numPatternY * numPatternZ * animationPhases;
 
-    const texture = getTexture(spriteId);
-    if (!texture) continue;
+    // Iterate furthest piece first, anchor (h=0, w=0) last, so painter's-algorithm
+    // ordering places the anchor on top of pieces extending up and to the left.
+    for (let h = height - 1; h >= 0; h--) {
+      for (let w = width - 1; w >= 0; w--) {
+        const spriteId = spriteIds[(h * width + w) * perCell];
+        if (!spriteId) continue;
 
-    const sprite = new Sprite(texture);
-    sprite.x = screenX;
-    sprite.y = screenY;
-    container.addChild(sprite);
+        const texture = getTexture(spriteId);
+        if (!texture) continue;
+
+        const sprite = new Sprite(texture);
+        sprite.x = screenX - w * TILE_SIZE;
+        sprite.y = screenY - h * TILE_SIZE;
+        container.addChild(sprite);
+      }
+    }
   }
 }
