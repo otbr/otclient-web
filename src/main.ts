@@ -13,10 +13,12 @@ import { Viewport, computePlayZoom } from './lib/viewport';
 import type { ViewRect } from './lib/viewport';
 import { buildCreatureIndex, createPlayer } from './lib/player';
 import type { PlayerState } from './lib/player';
-import { screenToTile } from './lib/input';
-import { findPath } from './lib/pathfinding';
+import { screenToTile, stepInDirection } from './lib/input';
+import { findPath, isTileWalkable } from './lib/pathfinding';
 import { startWalk, updateWalk } from './lib/walkAnimation';
 import type { WalkState } from './lib/walkAnimation';
+import { createJoystick } from './lib/joystick';
+import type { Direction } from './lib/player';
 import {
   buildIlluminationOverlay,
   createLightMaskTexture,
@@ -167,6 +169,10 @@ async function startApp(loaded: CompleteLoadedFiles) {
   let lastRenderRow = Number.NaN;
   let lastPlayerX = Number.NaN;
   let lastPlayerY = Number.NaN;
+  // Track direction so a turn-without-step (e.g. joystick held into a wall)
+  // still triggers a rebuild — without this, the sprite would only update
+  // when the player actually moves tiles.
+  let lastPlayerDirection = Number.NaN;
   let ambient: LightingOptions = NIGHT_AMBIENT;
   let illuminationTexture: RenderTexture | null = null;
   let animatedSprites: AnimatedSprite[] = [];
@@ -217,6 +223,7 @@ async function startApp(loaded: CompleteLoadedFiles) {
     lastRenderRow = playerRow;
     lastPlayerX = player.x;
     lastPlayerY = player.y;
+    lastPlayerDirection = player.direction;
     const above = renderTileRegion(
       tileMap, datIndex, atlasTextures, layout,
       visible.x1, visible.y1, visible.x2, Math.min(playerRow, visible.y2), renderZ,
@@ -319,6 +326,7 @@ async function startApp(loaded: CompleteLoadedFiles) {
       || renderRow !== lastRenderRow
       || player.x !== lastPlayerX
       || player.y !== lastPlayerY
+      || player.direction !== lastPlayerDirection
     ) {
       rebuildTiles();
     }
@@ -346,11 +354,50 @@ async function startApp(loaded: CompleteLoadedFiles) {
     }
   });
 
+  // --- Landscape joystick ---
+  // A virtual joystick for mobile landscape play. While held, it drives the
+  // player in the indicated cardinal direction one tile at a time; releasing
+  // it lets the current step finish and stop. Hidden in portrait — tap-to-walk
+  // is the portrait input model.
+  let joystickDir: Direction | null = null;
+  const joystick = createJoystick({
+    onChange: (dir) => { joystickDir = dir; },
+  });
+  // `pointer: coarse` excludes mouse-driven desktop browsers (which match
+  // `pointer: fine`) while matching phones and touch tablets — so the
+  // joystick only appears where it's actually useful and doesn't clutter
+  // the desktop view. Pair with orientation so it only takes the corner in
+  // landscape, where the layout has room for it.
+  const joystickQuery = window.matchMedia('(orientation: landscape) and (pointer: coarse)');
+  const applyJoystickVisibility = () => joystick.setVisible(joystickQuery.matches);
+  applyJoystickVisibility();
+  joystickQuery.addEventListener('change', applyJoystickVisibility);
+
   // --- Walk animation ticker ---
   // Drives the player along its computed A* path. Smoothly interpolates
   // both the player sprite position and the camera so the view follows
   // the player without jitter at tile boundaries.
   app.ticker.add(() => {
+    // Joystick: while a direction is held and we're not already walking,
+    // kick off a one-tile step in that direction. The ticker fires every
+    // frame, so as soon as the current step completes (active goes false)
+    // the next iteration starts the next step — that's the held-walk loop.
+    // Skipping when the tile is blocked avoids spamming startWalk against a
+    // wall: the knob stays "live" but no movement happens.
+    if (joystickDir !== null && (!walkState || !walkState.active)) {
+      const step = stepInDirection(player.x, player.y, joystickDir);
+      if (isTileWalkable(step.x, step.y, renderZ, tileMap, datIndex)) {
+        walkState = startWalk(player, [step], performance.now());
+      } else if (player.direction !== joystickDir) {
+        // Face the wall even when we can't step through it, for feedback.
+        // The ticker is about to return early since no walk is active, so
+        // we need to render() ourselves; the new direction-tracking
+        // rebuild condition will pick up the change.
+        player.direction = joystickDir;
+        render();
+      }
+    }
+
     if (!walkState || !walkState.active) return;
     const offset = updateWalk(walkState, player, performance.now());
     lastWalkOffsetX = offset.offsetX;
