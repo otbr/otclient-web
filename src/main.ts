@@ -22,7 +22,7 @@ import type { RenderTexture } from 'pixi.js';
 import type { DatFile } from './lib/dat';
 import type { SprFile } from './lib/spr';
 import type { OtbFile } from './lib/otb';
-import type { OtbmFile, OtbmRegion } from './lib/otbm';
+import type { OtbmFile, OtbmRegion, Position } from './lib/otbm';
 import type { CompleteLoadedFiles } from './lib/fileLoader';
 
 // --- File loading UI ---
@@ -86,13 +86,24 @@ async function startApp(loaded: CompleteLoadedFiles) {
   const otb: OtbFile = parseOtb(loaded.otb);
   setStatus('Parsed .otb...');
 
-  let initialRegion = getStandardRegion();
-  let otbm: OtbmFile = parseOtbmRegion(loaded.otbm, initialRegion);
-  if (otbm.tiles.length === 0) {
-    initialRegion = getInitialRegion(loaded.otbm);
-    otbm = parseOtbmRegion(loaded.otbm, initialRegion);
+  // Pass 1: parse only the towns list. A radius-0 region skips every
+  // TileArea, so the parser emits header + towns metadata — enough to
+  // pick a spawn before we pay for tile data.
+  const metadataRegion: OtbmRegion = { centerX: 0, centerY: 0, radius: 0, z: 7 };
+  const metadata: OtbmFile = parseOtbmRegion(loaded.otbm, metadataRegion);
+
+  // Pick the spawn: caller override (future server hook) → Rookgaard town
+  // (the canonical Tibia 7.6 starting point) → first town the map declares
+  // → first tile we can find by scanning.
+  const pickedSpawn = pickSpawn(metadata) ?? findFirstTile(loaded.otbm);
+  if (!pickedSpawn) {
+    console.warn('OTBM declares no towns and findFirstTile found nothing — spawning at (0, 0, 7). Map is probably empty or has an unusual structure.');
   }
-  setStatus(`Loaded ${otbm.tiles.length} tiles around (${initialRegion.centerX}, ${initialRegion.centerY})`);
+  const spawn: Position = pickedSpawn ?? { x: 0, y: 0, z: 7 };
+
+  const initialRegion: OtbmRegion = regionAround(spawn);
+  const otbm: OtbmFile = parseOtbmRegion(loaded.otbm, initialRegion);
+  setStatus(`Loaded ${otbm.tiles.length} tiles around (${spawn.x}, ${spawn.y})`);
 
   setStatus('Building texture atlas...');
   const referencedSpriteIds = collectReferencedSpriteIds(dat, otb, otbm);
@@ -106,13 +117,13 @@ async function startApp(loaded: CompleteLoadedFiles) {
 
   setStatus('Building tile map...');
   const tileMap = new TileMap(otbm, otb);
-  setStatus(`Loaded ${tileMap.size} tiles around (${initialRegion.centerX}, ${initialRegion.centerY})`);
+  setStatus(`Loaded ${tileMap.size} tiles around (${spawn.x}, ${spawn.y})`);
 
   const creatureIndex = buildCreatureIndex(dat);
   const player: PlayerState = createPlayer(
-    initialRegion.centerX,
-    initialRegion.centerY,
-    initialRegion.z ?? 7,
+    spawn.x,
+    spawn.y,
+    spawn.z,
     // Default outfit: lookType 128 (citizen). If the loaded .dat doesn't
     // ship that creature, renderPlayer falls back to drawing nothing —
     // the map still renders.
@@ -134,13 +145,13 @@ async function startApp(loaded: CompleteLoadedFiles) {
   document.body.appendChild(app.canvas);
 
   const viewport = new Viewport({
-    centerX: initialRegion.centerX,
-    centerY: initialRegion.centerY,
+    centerX: spawn.x,
+    centerY: spawn.y,
     screenWidth: window.innerWidth,
     screenHeight: window.innerHeight,
     playZoom: computePlayZoom(window.innerWidth, window.innerHeight),
   });
-  const renderZ = initialRegion.z ?? 7;
+  const renderZ = spawn.z;
 
   let tileContainer: Container | null = null;
   let lastVisibleKey = '';
@@ -264,25 +275,40 @@ async function startApp(loaded: CompleteLoadedFiles) {
     }
   });
 
-  console.log(`Map loaded: ${tileMap.size} tiles, center at (${initialRegion.centerX}, ${initialRegion.centerY})`);
+  console.log(`Map loaded: ${tileMap.size} tiles, spawn at (${spawn.x}, ${spawn.y}, z=${spawn.z})`);
 }
 
-function getStandardRegion(): OtbmRegion {
-  return { centerX: 32100, centerY: 32100, radius: INITIAL_REGION_RADIUS, z: 7 };
+function regionAround(p: Position): OtbmRegion {
+  return { centerX: p.x, centerY: p.y, radius: INITIAL_REGION_RADIUS, z: p.z };
 }
 
-function getInitialRegion(buffer: ArrayBuffer): OtbmRegion {
-  const tile = findFirstTile(buffer);
-  if (!tile) {
-    return getStandardRegion();
-  }
+/**
+ * Decide where the player should appear when the map loads.
+ *
+ * Layered fallbacks, in order of authority:
+ *   1. `override` — the future hook for server-driven login positions
+ *      ("you logged out at X, log back in there"). Unused today but
+ *      makes the seam explicit.
+ *   2. A town named "Rookgaard" — the canonical Tibia 7.6 starting
+ *      point. Every real-Tibia 7.6 OTBM declares it.
+ *   3. Any town the map declares — better than a hardcoded coordinate
+ *      because it's guaranteed to be inside the populated area of
+ *      *this* particular map.
+ *   4. `null` — caller falls back to a tile-scan probe.
+ */
+function pickSpawn(otbm: OtbmFile, override?: Position): Position | null {
+  if (override) return override;
 
-  return {
-    centerX: tile.x,
-    centerY: tile.y,
-    radius: INITIAL_REGION_RADIUS,
-    z: tile.z,
-  };
+  // Exact case-insensitive match wins over partial — otherwise "Rookgaard East"
+  // would shadow the canonical "Rookgaard" town when both exist.
+  const exact = otbm.towns.find(t => t.name.toLowerCase() === 'rookgaard');
+  if (exact) return exact.templePosition;
+
+  const partial = otbm.towns.find(t => /rookgaard/i.test(t.name));
+  if (partial) return partial.templePosition;
+
+  if (otbm.towns.length > 0) return otbm.towns[0].templePosition;
+  return null;
 }
 
 function findFirstTile(buffer: ArrayBuffer): { x: number; y: number; z: number } | null {
