@@ -6,8 +6,10 @@ import { OtbmAttr, OtbmNode, parseOtbmRegion } from './lib/otbm';
 import { NODE_END, NODE_START, readNodeData, skipNode } from './lib/nodeTree';
 import { buildAtlasPages, collectReferencedSpriteIds, computeAtlasLayout } from './lib/atlas';
 import { TileMap } from './lib/tileMap';
-import { createAtlasTextures, renderTileRegion, buildDatIndex } from './lib/tileRenderer';
+import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex } from './lib/tileRenderer';
 import { Viewport } from './lib/viewport';
+import { buildCreatureIndex, createPlayer } from './lib/player';
+import type { PlayerState } from './lib/player';
 import {
   buildIlluminationOverlay,
   createLightMaskTexture,
@@ -106,6 +108,17 @@ async function startApp(loaded: CompleteLoadedFiles) {
   const tileMap = new TileMap(otbm, otb);
   setStatus(`Loaded ${tileMap.size} tiles around (${initialRegion.centerX}, ${initialRegion.centerY})`);
 
+  const creatureIndex = buildCreatureIndex(dat);
+  const player: PlayerState = createPlayer(
+    initialRegion.centerX,
+    initialRegion.centerY,
+    initialRegion.z ?? 7,
+    // Default outfit: lookType 128 (citizen). If the loaded .dat doesn't
+    // ship that creature, renderPlayer falls back to drawing nothing —
+    // the map still renders.
+    { lookType: 128, headColor: 78, bodyColor: 132, legsColor: 13, feetColor: 38 },
+  );
+
   // Initialize PixiJS
   const app = new Application();
   await app.init({
@@ -148,13 +161,25 @@ async function startApp(loaded: CompleteLoadedFiles) {
     const visible = viewport.getVisibleTiles();
     lastVisibleKey = `${visible.x1},${visible.y1},${visible.x2},${visible.y2}`;
 
-    const tiles = renderTileRegion(
+    // Split tile rendering at the player's row so the player draws on top
+    // of objects to its north (walls, roofs) but behind objects to its south
+    // (trees, fences). Not pixel-perfect at the player's own row but a big
+    // improvement over "player always on top of everything".
+    const playerRow = Math.floor(player.y);
+    const tilesAbove = renderTileRegion(
       tileMap, datIndex, atlasTextures, layout,
-      visible.x1, visible.y1, visible.x2, visible.y2, renderZ,
+      visible.x1, visible.y1, visible.x2, Math.min(playerRow - 1, visible.y2), renderZ,
+    );
+    const tilesBelow = renderTileRegion(
+      tileMap, datIndex, atlasTextures, layout,
+      visible.x1, Math.max(playerRow, visible.y1), visible.x2, visible.y2, renderZ,
     );
 
     tileContainer = new Container();
-    tileContainer.addChild(tiles);
+    tileContainer.addChild(tilesAbove);
+    const playerSprite = renderPlayer(player, creatureIndex, atlasTextures, layout);
+    if (playerSprite) tileContainer.addChild(playerSprite);
+    tileContainer.addChild(tilesBelow);
 
     if (ambient.enabled) {
       const { sprite, texture } = buildIlluminationOverlay(
