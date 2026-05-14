@@ -19,26 +19,62 @@ export interface JoystickOptions {
 
 const BASE_SIZE_PX = 120;
 const KNOB_SIZE_PX = 50;
-const DEAD_ZONE_FRACTION = 0.25;
+const DEAD_ZONE_FRACTION = 0.35;
+// How much the dominant axis must exceed the secondary axis (as a ratio)
+// before a direction change is accepted. Prevents accidental flips when
+// the finger is near a diagonal. 1.0 = no hysteresis, 2.0 = very sticky.
+const AXIS_DOMINANCE_RATIO = 1.5;
 
 /**
  * Translate a knob displacement (pixels from the base center) into a cardinal
- * direction, applying a dead zone of `radius * DEAD_ZONE_FRACTION`. Pure so
+ * direction, applying a dead zone and axis-dominance hysteresis. Pure so
  * the math can be unit-tested without a DOM.
+ *
+ * `currentDir` enables hysteresis: the active direction is kept unless
+ * the new direction's axis clearly dominates (by AXIS_DOMINANCE_RATIO).
+ * Pass `null` for the initial press.
  */
 export function directionFromKnob(
   dx: number,
   dy: number,
   radius: number,
+  currentDir: Direction | null = null,
   deadZoneFraction = DEAD_ZONE_FRACTION,
 ): Direction | null {
   const dist = Math.hypot(dx, dy);
   if (dist < radius * deadZoneFraction) return null;
-  // 4-way: pick the dominant axis. Tibia 7.6 walking is cardinal.
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    return dx > 0 ? Direction.East : Direction.West;
+
+  const absDx = Math.abs(dx);
+  const absDy = Math.abs(dy);
+
+  // Determine the raw candidate direction
+  let candidate: Direction;
+  if (absDx >= absDy) {
+    candidate = dx > 0 ? Direction.East : Direction.West;
+  } else {
+    candidate = dy > 0 ? Direction.South : Direction.North;
   }
-  return dy > 0 ? Direction.South : Direction.North;
+
+  // If we already have a direction, require clear dominance to switch
+  // axes. This prevents flips when the finger wobbles near a diagonal.
+  // 180° flips on the same axis (East↔West, North↔South) are always
+  // allowed — the user clearly reversed direction.
+  if (currentDir !== null && candidate !== currentDir) {
+    const isOpposite =
+      (currentDir === Direction.East && candidate === Direction.West)
+      || (currentDir === Direction.West && candidate === Direction.East)
+      || (currentDir === Direction.North && candidate === Direction.South)
+      || (currentDir === Direction.South && candidate === Direction.North);
+    if (!isOpposite) {
+      const dominantAxis = absDx >= absDy ? absDx : absDy;
+      const secondaryAxis = absDx >= absDy ? absDy : absDx;
+      if (dominantAxis < secondaryAxis * AXIS_DOMINANCE_RATIO) {
+        return currentDir; // Not dominant enough — keep current
+      }
+    }
+  }
+
+  return candidate;
 }
 
 /**
@@ -104,21 +140,24 @@ export function createJoystick(opts: JoystickOptions): JoystickHandle {
     emit(null);
   }
 
-  function update(e: PointerEvent) {
-    if (!baseRect) return;
+  /** Compute clamped knob displacement from a pointer event. */
+  function knobDelta(e: PointerEvent): { dx: number; dy: number; r: number } | null {
+    if (!baseRect) return null;
     const cx = baseRect.left + baseRect.width / 2;
     const cy = baseRect.top + baseRect.height / 2;
     let dx = e.clientX - cx;
     let dy = e.clientY - cy;
     const r = baseRect.width / 2;
-    // Clamp to the base circle so the knob never wanders outside the well.
     const dist = Math.hypot(dx, dy);
-    if (dist > r) {
-      dx = (dx / dist) * r;
-      dy = (dy / dist) * r;
-    }
-    setKnob(dx, dy);
-    emit(directionFromKnob(dx, dy, r));
+    if (dist > r) { dx = (dx / dist) * r; dy = (dy / dist) * r; }
+    return { dx, dy, r };
+  }
+
+  function update(e: PointerEvent) {
+    const d = knobDelta(e);
+    if (!d) return;
+    setKnob(d.dx, d.dy);
+    emit(directionFromKnob(d.dx, d.dy, d.r, currentDir));
   }
 
   function onDown(e: PointerEvent) {
@@ -127,7 +166,10 @@ export function createJoystick(opts: JoystickOptions): JoystickHandle {
     activePointerId = e.pointerId;
     baseRect = base.getBoundingClientRect();
     base.setPointerCapture(e.pointerId);
-    update(e);
+    // Don't emit a direction on touch-down — wait for the drag to
+    // establish intent. Just move the knob visually.
+    const d = knobDelta(e);
+    if (d) setKnob(d.dx, d.dy);
     e.preventDefault();
   }
 
