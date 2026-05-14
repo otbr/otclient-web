@@ -141,11 +141,26 @@ async function startApp(loaded: CompleteLoadedFiles) {
     { lookType: 128, headColor: 58, bodyColor: 87, legsColor: 58, feetColor: 58 },
   );
 
-  // Initialize PixiJS
+  // Initialize PixiJS.
+  //
+  // Note: deliberately *not* using `resizeTo: window`. On iOS Safari the
+  // `resize` event fires on orientation change before `window.innerWidth/
+  // innerHeight` have updated, so PixiJS' internal resize handler picks
+  // up stale dimensions and leaves a black bar after the rotation
+  // completes. We manage resize ourselves below with a two-RAF debounce
+  // that gives the browser time to settle before remeasuring.
+  // visualViewport (when supported) reports the actually-visible area
+  // excluding mobile browser chrome (URL bar, on-screen keyboard); using
+  // it for sizing avoids the dropped-strip case where the page is sized
+  // to innerHeight but the visible viewport is shorter.
+  const initialW = window.visualViewport?.width ?? window.innerWidth;
+  const initialH = window.visualViewport?.height ?? window.innerHeight;
+
   const app = new Application();
   await app.init({
     background: '#000000',
-    resizeTo: window,
+    width: initialW,
+    height: initialH,
     antialias: false,
     resolution: window.devicePixelRatio,
     autoDensity: true,
@@ -158,9 +173,9 @@ async function startApp(loaded: CompleteLoadedFiles) {
   const viewport = new Viewport({
     centerX: spawn.x,
     centerY: spawn.y,
-    screenWidth: window.innerWidth,
-    screenHeight: window.innerHeight,
-    playZoom: computePlayZoom(window.innerWidth, window.innerHeight),
+    screenWidth: initialW,
+    screenHeight: initialH,
+    playZoom: computePlayZoom(initialW, initialH),
   });
   const renderZ = spawn.z;
 
@@ -592,13 +607,54 @@ async function startApp(loaded: CompleteLoadedFiles) {
   document.body.appendChild(zoomBtn);
 
   // Handle window resize / orientation change: recompute the play zoom for
-  // the new screen so the visible play area stays consistent across devices.
-  window.addEventListener('resize', () => {
-    viewport.screenWidth = window.innerWidth;
-    viewport.screenHeight = window.innerHeight;
-    viewport.applyPlayZoom(computePlayZoom(window.innerWidth, window.innerHeight));
-    render();
-  });
+  // the new screen so the visible play area stays consistent across
+  // devices. iOS Safari fires `resize` while `innerWidth/innerHeight` are
+  // still mid-rotation — measuring then leaves a black bar where the new
+  // orientation extends past the (stale) canvas. We wait two animation
+  // frames before remeasuring; one isn't enough on slower devices.
+  let resizeRaf: number | null = null;
+  function scheduleViewportUpdate() {
+    if (resizeRaf !== null) cancelAnimationFrame(resizeRaf);
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = requestAnimationFrame(() => {
+        resizeRaf = null;
+        // visualViewport reflects the area that's actually visible — on
+        // mobile this excludes the URL bar / soft keyboard; on desktop
+        // it tracks pinch-zoom. innerWidth/innerHeight as a fallback for
+        // older browsers (notably anything pre-iOS 13).
+        const w = window.visualViewport?.width ?? window.innerWidth;
+        const h = window.visualViewport?.height ?? window.innerHeight;
+        // visualViewport.resize fires liberally on mobile (URL-bar
+        // reveal, pinch); skip if nothing actually changed.
+        if (w === viewport.screenWidth && h === viewport.screenHeight) return;
+        app.renderer.resize(w, h);
+        viewport.screenWidth = w;
+        viewport.screenHeight = h;
+        viewport.applyPlayZoom(computePlayZoom(w, h));
+        // applyPlayZoom snaps zoom back to the locked baseline and
+        // narrows the min/max bounds. If the user had unlocked zoom
+        // ("Free") the UI would otherwise be desynced from the now-
+        // re-locked viewport, so reset the toggle to match.
+        if (zoomUnlocked) {
+          zoomUnlocked = false;
+          zoomBtn.textContent = 'Zoom: locked';
+          zoomBtn.style.background = '#3a3a3a';
+        }
+        render();
+      });
+    });
+  }
+  window.addEventListener('resize', scheduleViewportUpdate);
+  window.addEventListener('orientationchange', scheduleViewportUpdate);
+  // visualViewport tracks the actually-visible area (excludes URL bar) on
+  // mobile; firing on its resize catches URL-bar reveal/hide and pinch.
+  window.visualViewport?.addEventListener('resize', scheduleViewportUpdate);
+  // Cold-start fix: on installed iOS PWAs the initial visualViewport
+  // dimensions can be reported before the status-bar layout settles,
+  // leaving a black strip at the top. Fire one deferred remeasure so
+  // the canvas catches the post-layout size without needing the user
+  // to interact first.
+  scheduleViewportUpdate();
 
   // N toggles night/day so you can see the difference
   window.addEventListener('keydown', (e: KeyboardEvent) => {
