@@ -125,10 +125,12 @@ async function startApp(loaded: CompleteLoadedFiles) {
     spawn.x,
     spawn.y,
     spawn.z,
-    // Default outfit: lookType 128 (citizen). If the loaded .dat doesn't
-    // ship that creature, renderPlayer falls back to drawing nothing —
-    // the map still renders.
-    { lookType: 128, headColor: 78, bodyColor: 132, legsColor: 13, feetColor: 38 },
+    // Default outfit: lookType 128 (citizen) with classic Tibia 7.x/8.x
+    // newbie colors (brown hair, blue shirt, brown trousers/shoes).
+    // NOTE: the renderer doesn't apply outfit colors yet — the HSI palette
+    // tinting pass is a follow-up. These values are stored so the moment
+    // tinting lands, the citizen looks right without another change here.
+    { lookType: 128, headColor: 95, bodyColor: 88, legsColor: 95, feetColor: 95 },
   );
 
   // Initialize PixiJS
@@ -174,18 +176,19 @@ async function startApp(loaded: CompleteLoadedFiles) {
     const visible = viewport.getVisibleTiles();
     lastVisibleKey = `${visible.x1},${visible.y1},${visible.x2},${visible.y2}`;
 
-    // Split tile rendering at the player's row so the player draws on top
-    // of objects to its north (walls, roofs) but behind objects to its south
-    // (trees, fences). Not pixel-perfect at the player's own row but a big
-    // improvement over "player always on top of everything".
+    // Split tile rendering around the player's row so the player draws on
+    // top of items at and north of its tile (floor, decorations, walls
+    // behind it) but behind items south (trees, fences). Including the
+    // player's own row in `above` means the floor and items on the player's
+    // tile draw BEHIND the player sprite — which is what we want.
     const playerRow = Math.floor(player.y);
     const above = renderTileRegion(
       tileMap, datIndex, atlasTextures, layout,
-      visible.x1, visible.y1, visible.x2, Math.min(playerRow - 1, visible.y2), renderZ,
+      visible.x1, visible.y1, visible.x2, Math.min(playerRow, visible.y2), renderZ,
     );
     const below = renderTileRegion(
       tileMap, datIndex, atlasTextures, layout,
-      visible.x1, Math.max(playerRow, visible.y1), visible.x2, visible.y2, renderZ,
+      visible.x1, Math.max(playerRow + 1, visible.y1), visible.x2, visible.y2, renderZ,
     );
     animatedSprites = [...above.animated, ...below.animated];
 
