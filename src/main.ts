@@ -6,9 +6,11 @@ import { OtbmAttr, OtbmNode, parseOtbmRegion } from './lib/otbm';
 import { NODE_END, NODE_START, readNodeData, skipNode } from './lib/nodeTree';
 import { buildAtlasPages, collectReferencedSpriteIds, computeAtlasLayout } from './lib/atlas';
 import { TileMap } from './lib/tileMap';
+import type { Bounds } from './lib/tileMap';
 import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex } from './lib/tileRenderer';
 import type { AnimatedSprite, TintedTextureCache } from './lib/tileRenderer';
 import { Viewport, computePlayZoom } from './lib/viewport';
+import type { ViewRect } from './lib/viewport';
 import { buildCreatureIndex, createPlayer } from './lib/player';
 import type { PlayerState } from './lib/player';
 import { screenToTile } from './lib/input';
@@ -29,6 +31,7 @@ import type { SprFile } from './lib/spr';
 import type { OtbFile } from './lib/otb';
 import type { OtbmFile, OtbmRegion, Position } from './lib/otbm';
 import type { CompleteLoadedFiles } from './lib/fileLoader';
+import { needsExpansion } from './lib/regionExpansion';
 
 // --- File loading UI ---
 
@@ -261,13 +264,57 @@ async function startApp(loaded: CompleteLoadedFiles) {
     tileContainer.scale.set(viewport.zoom);
   }
 
+  // --- Dynamic region expansion ---
+  // Tracks the bounds snapshot from the last expansion attempt that found
+  // no new tiles. If bounds haven't grown since, we skip the expensive
+  // OTBM re-parse — the file won't have new data in that direction.
+  let lastExpansionTime = 0;
+  const EXPANSION_COOLDOWN_MS = 500;
+  // Track which (bounds + direction) combos yielded no new tiles so we
+  // don't rescan the OTBM in that direction again until bounds grow.
+  const exhaustedDirections = new Set<string>();
+
+  function expansionKey(b: Bounds | null, region: OtbmRegion): string {
+    const bk = b ? `${b.minX},${b.minY},${b.maxX},${b.maxY}` : '';
+    return `${bk}@${region.centerX},${region.centerY}`;
+  }
+
+  function tryExpand(visible: ViewRect): boolean {
+    const now = performance.now();
+    if (now - lastExpansionTime < EXPANSION_COOLDOWN_MS) return false;
+
+    const currentBounds = tileMap.getBounds(renderZ);
+    const region = needsExpansion(currentBounds, visible, renderZ, 30);
+    if (!region) return false;
+
+    const ek = expansionKey(currentBounds, region);
+    if (exhaustedDirections.has(ek)) return false;
+
+    const prevSize = tileMap.size;
+    const expanded = parseOtbmRegion(loaded.otbm, region);
+    // TODO: tiles whose sprites aren't in the initial atlas render blank.
+    // Follow-up: rebuild atlas on merge, or pre-load all item sprites.
+    tileMap.merge(expanded);
+    lastExpansionTime = now;
+
+    if (tileMap.size > prevSize) {
+      exhaustedDirections.clear(); // bounds grew — all directions worth retrying
+      console.log('[map] expanded →', tileMap.getBounds(renderZ));
+      return true;
+    }
+    exhaustedDirections.add(ek);
+    return false;
+  }
+
   function render(forceRebuild = false) {
     const visible = viewport.getVisibleTiles();
     const key = `${visible.x1},${visible.y1},${visible.x2},${visible.y2}`;
     const renderRow = computeRenderRow();
 
+    const expanded = tryExpand(visible);
     if (
       forceRebuild
+      || expanded
       || key !== lastVisibleKey
       || renderRow !== lastRenderRow
       || player.x !== lastPlayerX
