@@ -158,24 +158,37 @@ function renderTile(
     const thingType = datIndex.get(item.clientId);
     if (!thingType) continue;
 
-    const { width, height, layers, numPatternX, numPatternY, numPatternZ, animationPhases, spriteIds } = thingType.frameGroup;
-    // Sprites are laid out (h, w, layer, patternX, patternY, patternZ, anim) with anim innermost.
-    // For static rendering we use the first layer/pattern/animation of each (w, h) cell.
-    const perCell = layers * numPatternX * numPatternY * numPatternZ * animationPhases;
+    // Pixel offset applied to every cell of this item — walls and door frames
+    // use it to sit flush against the tile edge, wall-mounted fixtures use it
+    // to overhang properly. Reads {x, y} from dat; both default to 0.
+    const displacement = thingType.attrs.get(DatAttr.Displacement);
+    const dispX = (typeof displacement === 'object' && displacement && 'x' in displacement) ? displacement.x : 0;
+    const dispY = (typeof displacement === 'object' && displacement && 'y' in displacement) ? displacement.y : 0;
+
+    const { width, height, numPatternX, numPatternY, spriteIds } = thingType.frameGroup;
+    // DAT sprite layout (matches OTClient reference):
+    //   index = (((((phase*patZ + z)*patY + y)*patX + x)*layers + layer)*height + h)*width + w
+    // For static rendering we pick phase=0, layer=0, z-pattern=0, and pick the
+    // (x, y) pattern from the tile's world position. That gives cobblestone
+    // and other ground tiles their natural-looking variation across a stretch
+    // — the cosmetic random Tibia uses to avoid an obvious tiled grid.
+    const patX = ((tile.x % numPatternX) + numPatternX) % numPatternX;
+    const patY = ((tile.y % numPatternY) + numPatternY) % numPatternY;
+    const patternOffset = (patY * numPatternX + patX) * height * width;
 
     // Iterate furthest piece first, anchor (h=0, w=0) last, so painter's-algorithm
     // ordering places the anchor on top of pieces extending up and to the left.
     for (let h = height - 1; h >= 0; h--) {
       for (let w = width - 1; w >= 0; w--) {
-        const spriteId = spriteIds[(h * width + w) * perCell];
+        const spriteId = spriteIds[patternOffset + h * width + w];
         if (!spriteId) continue;
 
         const texture = getTexture(spriteId);
         if (!texture) continue;
 
         const sprite = new Sprite(texture);
-        sprite.x = screenX - w * TILE_SIZE;
-        sprite.y = screenY - h * TILE_SIZE - elevation;
+        sprite.x = screenX - w * TILE_SIZE - dispX;
+        sprite.y = screenY - h * TILE_SIZE - elevation - dispY;
         container.addChild(sprite);
       }
     }
