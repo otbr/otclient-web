@@ -33,7 +33,7 @@ import type { SprFile } from './lib/spr';
 import type { OtbFile } from './lib/otb';
 import type { OtbmFile, OtbmRegion, Position } from './lib/otbm';
 import type { CompleteLoadedFiles } from './lib/fileLoader';
-import { needsExpansion } from './lib/regionExpansion';
+import { needsExpansion, needsExpansionForDestination } from './lib/regionExpansion';
 
 // --- File loading UI ---
 
@@ -480,6 +480,33 @@ async function startApp(loaded: CompleteLoadedFiles) {
       // the queued path so the player stops cleanly at the end of the
       // current step instead of chasing the previous destination.
       const tile = screenToTile(e.clientX, e.clientY, viewport);
+
+      // Anticipatory expansion: if the tap destination is near or outside
+      // loaded bounds, expand the map toward it before pathfinding.
+      // Reuses exhaustedDirections from viewport expansion to avoid
+      // repeated expensive OTBM parses for taps in areas with no data.
+      const currentBounds = tileMap.getBounds(renderZ);
+      const destRegion = needsExpansionForDestination(
+        currentBounds, tile.x, tile.y, renderZ, 30,
+      );
+      if (destRegion) {
+        const ek = expansionKey(currentBounds, destRegion);
+        if (!exhaustedDirections.has(ek)) {
+          const prevSize = tileMap.size;
+          const expanded = parseOtbmRegion(loaded.otbm, destRegion);
+          tileMap.merge(expanded);
+          if (tileMap.size > prevSize) {
+            exhaustedDirections.clear();
+            if (import.meta.env.DEV) {
+              console.log('[map] walk-expand →', tileMap.getBounds(renderZ));
+            }
+            render(true);
+          } else {
+            exhaustedDirections.add(ek);
+          }
+        }
+      }
+
       const startX = walkState?.active ? walkState.toX : player.x;
       const startY = walkState?.active ? walkState.toY : player.y;
       const path = findPath(startX, startY, tile.x, tile.y, renderZ, tileMap, datIndex);

@@ -58,3 +58,49 @@ export function needsExpansion(
 
   return null;
 }
+
+const MIN_EXPANSION_RADIUS = 100;
+const MAX_EXPANSION_RADIUS = 500;
+
+/**
+ * Anticipatory expansion: check if a walk destination is near or outside
+ * the loaded map bounds. If so, return a region that covers both the
+ * destination and the gap from current bounds.
+ *
+ * The region is centered on the midpoint between the bounds center and
+ * the destination, with radius clamped to [MIN, MAX]. One bigger
+ * expansion is cheaper than several iterative ones.
+ */
+export function needsExpansionForDestination(
+  bounds: Bounds | null,
+  destX: number,
+  destY: number,
+  z: number,
+  paddingTiles: number,
+): OtbmRegion | null {
+  if (!bounds) return null;
+
+  const nearLeft = destX <= bounds.minX + paddingTiles;
+  const nearRight = destX >= bounds.maxX - paddingTiles;
+  const nearTop = destY <= bounds.minY + paddingTiles;
+  const nearBottom = destY >= bounds.maxY - paddingTiles;
+
+  if (!nearLeft && !nearRight && !nearTop && !nearBottom) return null;
+
+  // Center the region on the midpoint between the closest bounds edge
+  // and the destination, with enough radius to cover both.
+  const boundsCenter = {
+    x: Math.floor((bounds.minX + bounds.maxX) / 2),
+    y: Math.floor((bounds.minY + bounds.maxY) / 2),
+  };
+
+  const midX = Math.floor((boundsCenter.x + destX) / 2);
+  const midY = Math.floor((boundsCenter.y + destY) / 2);
+  const halfDist = Math.max(
+    Math.abs(destX - boundsCenter.x),
+    Math.abs(destY - boundsCenter.y),
+  ) / 2;
+  const radius = Math.min(MAX_EXPANSION_RADIUS, Math.max(MIN_EXPANSION_RADIUS, Math.floor(halfDist) + 50));
+
+  return { centerX: midX, centerY: midY, radius, z };
+}
