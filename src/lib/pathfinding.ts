@@ -24,6 +24,12 @@ function heuristic(ax: number, ay: number, bx: number, by: number): number {
  * Check if a tile is walkable. A tile is not walkable if:
  * - It doesn't exist in the tile map (no ground)
  * - Any of its items has the NotWalkable or NotPathable attribute in .dat
+ *
+ * Exception: tiles carrying a floor-change flag (stairs, holes, ladders)
+ * are always walkable, even when the stair item also flags NotWalkable
+ * in .dat — they're the entry point to the next floor. TFS treats them
+ * the same way (`Tile::queryDestination` resolves the next floor's
+ * position rather than blocking on the stair item itself).
  */
 export function isTileWalkable(
   x: number, y: number, z: number,
@@ -33,7 +39,14 @@ export function isTileWalkable(
   const tile = tileMap.getTile(x, y, z);
   if (!tile) return false;
 
+  // Floor-change items override their own block flags (a stair's own
+  // BlockSolid is bypassed because the stair is the entry point to the
+  // next floor) but they do NOT override blocks from *other* items on
+  // the same tile — a wall stacked next to a stair still blocks. One
+  // pass over the stack; floor-change items are skipped from the block
+  // check, anything else still has the chance to veto.
   for (const item of tile.items) {
+    if (item.floorChange) continue;
     const thingType = datIndex.get(item.clientId);
     if (thingType && (thingType.attrs.has(DatAttr.NotWalkable) || thingType.attrs.has(DatAttr.NotPathable))) {
       return false;
@@ -97,6 +110,12 @@ export function findPath(
       const neighborKey = `${nx}:${ny}`;
 
       if (!isTileWalkable(nx, ny, z, tileMap, datIndex)) continue;
+      // Floor-change tiles are reachable as a destination but A* must
+      // not route *through* them — otherwise a stair on a same-floor
+      // path would teleport the walker mid-route. Matches TFS
+      // Tile::queryAdd, which returns RETURNVALUE_NOTPOSSIBLE for
+      // floor-change tiles when FLAG_PATHFINDING is set.
+      if (neighborKey !== goalKey && tileMap.getFloorChange(nx, ny, z)) continue;
 
       const tentativeG = current.g + 1;
 

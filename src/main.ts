@@ -6,8 +6,8 @@ import { OtbmAttr, OtbmNode, parseOtbmRegion } from './lib/otbm';
 import { NODE_END, NODE_START, readNodeData, skipNode } from './lib/nodeTree';
 import { buildAtlasPages, collectReferencedSpriteIds, computeAtlasLayout } from './lib/atlas';
 import { TileMap } from './lib/tileMap';
-import type { Bounds } from './lib/tileMap';
-import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex } from './lib/tileRenderer';
+import type { Bounds, FloorChange } from './lib/tileMap';
+import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex, TILE_SIZE } from './lib/tileRenderer';
 import type { AnimatedSprite, TintedTextureCache } from './lib/tileRenderer';
 import { Viewport, computePlayZoom } from './lib/viewport';
 import type { ViewRect } from './lib/viewport';
@@ -18,7 +18,7 @@ import { findPath, isTileWalkable } from './lib/pathfinding';
 import { startWalk, updateWalk } from './lib/walkAnimation';
 import type { WalkState } from './lib/walkAnimation';
 import { createJoystick } from './lib/joystick';
-import type { Direction } from './lib/player';
+import { Direction } from './lib/player';
 import {
   buildIlluminationOverlay,
   createLightMaskTexture,
@@ -198,7 +198,9 @@ async function startApp(loaded: CompleteLoadedFiles) {
     screenHeight: initialH,
     playZoom: computePlayZoom(initialW, initialH),
   });
-  const renderZ = spawn.z;
+  // Mutable so floor-change tiles (stair/hole/ladder) can update it on
+  // step-land; everything that takes a z parameter reads this each frame.
+  let renderZ = spawn.z;
 
   let tileContainer: Container | null = null;
   let lastVisibleKey = '';
@@ -405,6 +407,70 @@ async function startApp(loaded: CompleteLoadedFiles) {
   applyJoystickVisibility();
   joystickQuery.addEventListener('change', applyJoystickVisibility);
 
+  // --- Floor changes ---
+  // Apply the geometry of an OTB FloorChange* flag to player + camera +
+  // tilemap. Geometry mirrors TFS Tile::queryDestination (src/tile.cpp).
+  // Up-<dir> goes to z-1 with a one-tile shift in <dir> on the new floor
+  // and the player faces that direction; down is z+1 with an *inverse*
+  // shift when the destination tile is itself a directional up-stair
+  // (the partner side of a bidirectional stair) so the player doesn't
+  // land on top of it and instantly re-trigger going back up.
+  function handleFloorChange(fc: FloorChange) {
+    if (fc === 'down') {
+      renderZ++;
+      player.z = renderZ;
+      // Ensure destination tiles are loaded so we can read the partner
+      // tile's flags. Skip the parse if we already have tiles there —
+      // round-tripping the same stair becomes instant after the first
+      // visit instead of re-parsing the OTBM each time.
+      ensureLoadedAt(player.x, player.y, renderZ);
+      // Bidirectional stair: if the tile we'd land on carries a
+      // directional FloorChange (it's the upstair partner of the down-
+      // stair we just stepped on), apply the inverse of that direction
+      // so we land one tile away from the upstair tile.
+      const partner = tileMap.getFloorChange(player.x, player.y, renderZ);
+      if (partner === 'up-north') player.y++;
+      else if (partner === 'up-south') player.y--;
+      else if (partner === 'up-east') player.x--;
+      else if (partner === 'up-west') player.x++;
+    } else {
+      renderZ--;
+      if (fc === 'up-north') { player.y--; player.direction = Direction.North; }
+      else if (fc === 'up-east') { player.x++; player.direction = Direction.East; }
+      else if (fc === 'up-south') { player.y++; player.direction = Direction.South; }
+      else if (fc === 'up-west') { player.x--; player.direction = Direction.West; }
+      player.z = renderZ;
+      ensureLoadedAt(player.x, player.y, renderZ);
+    }
+    // expansionKey doesn't include z, so an exhausted-direction entry
+    // from the old floor would wrongly suppress retries on the new
+    // floor. Clear the set on every floor change.
+    exhaustedDirections.clear();
+    viewport.centerX = player.x;
+    viewport.centerY = player.y;
+    render(true);
+  }
+
+  // Parse + merge a small region around (x, y, z) only when the tilemap
+  // doesn't already cover it. Cheap cache check first (one Map lookup),
+  // expensive parse only on miss.
+  function ensureLoadedAt(x: number, y: number, z: number) {
+    if (tileMap.getTile(x, y, z)) return;
+    const region: OtbmRegion = { centerX: x, centerY: y, radius: 25, z };
+    tileMap.merge(parseOtbmRegion(loaded.otbm, region));
+  }
+
+  // Floor changes can fire from any startWalk callsite. The callback
+  // checks the landed tile and, when it's a stair/hole, aborts the rest
+  // of the queued path (so we stop on the stair like TFS does) and
+  // teleports via handleFloorChange.
+  const onStepLand = (x: number, y: number) => {
+    const fc = tileMap.getFloorChange(x, y, renderZ);
+    if (!fc) return;
+    if (walkState) walkState.path = [];
+    handleFloorChange(fc);
+  };
+
   // --- Walk animation ticker ---
   // Drives the player along its computed A* path. Smoothly interpolates
   // both the player sprite position and the camera so the view follows
@@ -419,7 +485,7 @@ async function startApp(loaded: CompleteLoadedFiles) {
     if (joystickDir !== null && (!walkState || !walkState.active)) {
       const step = stepInDirection(player.x, player.y, joystickDir);
       if (isTileWalkable(step.x, step.y, renderZ, tileMap, datIndex)) {
-        walkState = startWalk(player, [step], performance.now());
+        walkState = startWalk(player, [step], performance.now(), onStepLand);
       } else if (player.direction !== joystickDir) {
         // Face the wall even when we can't step through it, for feedback.
         // The ticker is about to return early since no walk is active, so
@@ -435,10 +501,13 @@ async function startApp(loaded: CompleteLoadedFiles) {
     lastWalkOffsetX = offset.offsetX;
     lastWalkOffsetY = offset.offsetY;
 
-    // Smooth camera follow — viewport.centerX is in tile coords, so the
-    // fractional progress between fromX→toX is exactly the camera target.
-    viewport.centerX = walkState.fromX + (walkState.toX - walkState.fromX) * walkState.progress;
-    viewport.centerY = walkState.fromY + (walkState.toY - walkState.fromY) * walkState.progress;
+    // Smooth camera follow — track the player's interpolated position
+    // (player tile + fractional walk offset). Anchoring on player.x/y
+    // instead of walkState.fromX/toX means a floor-change-driven
+    // teleport inside updateWalk's callback (which mutates player.x/y)
+    // doesn't get overwritten by the old walkState's fromX/toX values.
+    viewport.centerX = player.x + offset.offsetX / TILE_SIZE;
+    viewport.centerY = player.y + offset.offsetY / TILE_SIZE;
 
     // Render BEFORE applying the offset on the existing sprite. render()
     // may rebuild the tile container (when the visible region key, render
@@ -547,7 +616,7 @@ async function startApp(loaded: CompleteLoadedFiles) {
       if (walkState?.active) {
         walkState.path = path ?? [];
       } else if (path && path.length > 0) {
-        walkState = startWalk(player, path, performance.now());
+        walkState = startWalk(player, path, performance.now(), onStepLand);
         render(true); // pick up the new facing direction immediately
       }
     }
