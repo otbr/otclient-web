@@ -7,7 +7,7 @@ import { NODE_END, NODE_START, readNodeData, skipNode } from './lib/nodeTree';
 import { buildAtlasPages, collectReferencedSpriteIds, computeAtlasLayout } from './lib/atlas';
 import { TileMap } from './lib/tileMap';
 import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex } from './lib/tileRenderer';
-import { Viewport } from './lib/viewport';
+import { Viewport, computePlayZoom } from './lib/viewport';
 import { buildCreatureIndex, createPlayer } from './lib/player';
 import type { PlayerState } from './lib/player';
 import {
@@ -138,7 +138,7 @@ async function startApp(loaded: CompleteLoadedFiles) {
     centerY: initialRegion.centerY,
     screenWidth: window.innerWidth,
     screenHeight: window.innerHeight,
-    zoom: 1,
+    playZoom: computePlayZoom(window.innerWidth, window.innerHeight),
   });
   const renderZ = initialRegion.z ?? 7;
 
@@ -240,48 +240,20 @@ async function startApp(loaded: CompleteLoadedFiles) {
     isDragging = false;
   });
 
-  // Mouse wheel zoom
-  app.canvas.addEventListener('wheel', (e: WheelEvent) => {
-    e.preventDefault();
-    const factor = e.deltaY > 0 ? 0.9 : 1.1;
-    viewport.zoomBy(factor);
-    render();
+  // Block native pinch / wheel zoom on the canvas so the locked play zoom
+  // is enforced even against system-level gestures.
+  app.canvas.addEventListener('wheel', (e: WheelEvent) => { e.preventDefault(); }, { passive: false });
+  app.canvas.addEventListener('touchmove', (e: TouchEvent) => {
+    if (e.touches.length > 1) e.preventDefault();
   }, { passive: false });
 
-  // Pinch-to-zoom
-  let lastPinchDist = 0;
-
-  app.canvas.addEventListener('touchstart', (e: TouchEvent) => {
-    if (e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      lastPinchDist = Math.sqrt(dx * dx + dy * dy);
-    }
-  }, { passive: true });
-
-  app.canvas.addEventListener('touchmove', (e: TouchEvent) => {
-    if (e.touches.length === 2) {
-      const dx = e.touches[0].clientX - e.touches[1].clientX;
-      const dy = e.touches[0].clientY - e.touches[1].clientY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (lastPinchDist > 0) {
-        const factor = dist / lastPinchDist;
-        viewport.zoomBy(factor);
-        render();
-      }
-      lastPinchDist = dist;
-    }
-  }, { passive: true });
-
-  app.canvas.addEventListener('touchend', () => {
-    lastPinchDist = 0;
-  }, { passive: true });
-
-  // Handle window resize
+  // Handle window resize / orientation change: recompute the play zoom for
+  // the new screen so the visible play area stays consistent across devices.
   window.addEventListener('resize', () => {
     viewport.screenWidth = window.innerWidth;
     viewport.screenHeight = window.innerHeight;
-    render();
+    viewport.applyPlayZoom(computePlayZoom(window.innerWidth, window.innerHeight));
+    render(true);
   });
 
   // N toggles night/day so you can see the difference

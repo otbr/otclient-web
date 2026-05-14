@@ -25,7 +25,12 @@ export type { ResolvedTile, ResolvedItem } from './tileMap';
 export { createAtlasTextures, getSpriteTexture, buildDatIndex, renderTileRegion, renderPlayer } from './tileRenderer';
 export type { AtlasTextures } from './tileRenderer';
 
-export { Viewport } from './viewport';
+export {
+  Viewport,
+  computePlayZoom,
+  PORTRAIT_PLAY_TILES_X,
+  LANDSCAPE_PLAY_TILES_X,
+} from './viewport';
 export type { ViewRect } from './viewport';
 
 // Player & movement

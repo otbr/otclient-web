@@ -1,5 +1,25 @@
 const TILE_SIZE = 32;
 
+/**
+ * Number of horizontal tiles visible at the device's play zoom. Tibia is a
+ * competitive shared world so the zoom stays fixed — every player sees the
+ * same play area. Pulled back a bit from the classic 15×11 to maximise
+ * situational awareness on mobile.
+ */
+export const PORTRAIT_PLAY_TILES_X = 17;
+export const LANDSCAPE_PLAY_TILES_X = 21;
+
+/**
+ * Compute the zoom level that fits the desired horizontal tile count on
+ * this device. Bigger screen → bigger tiles at the same zoom, so all
+ * devices see roughly the same play area.
+ */
+export function computePlayZoom(screenWidth: number, screenHeight: number): number {
+  const isLandscape = screenWidth > screenHeight;
+  const target = isLandscape ? LANDSCAPE_PLAY_TILES_X : PORTRAIT_PLAY_TILES_X;
+  return screenWidth / (target * TILE_SIZE);
+}
+
 export interface ViewRect {
   x1: number;
   y1: number;
@@ -21,8 +41,11 @@ export class Viewport {
   screenWidth: number;
   screenHeight: number;
 
-  readonly minZoom: number;
-  readonly maxZoom: number;
+  minZoom: number;
+  maxZoom: number;
+  /** The baseline zoom for this device. Pinch/wheel deviates from it; resize
+   *  + double-tap reset back to it. */
+  playZoom: number;
 
   constructor(opts: {
     centerX: number;
@@ -32,14 +55,32 @@ export class Viewport {
     zoom?: number;
     minZoom?: number;
     maxZoom?: number;
+    playZoom?: number;
   }) {
     this.centerX = opts.centerX;
     this.centerY = opts.centerY;
     this.screenWidth = opts.screenWidth;
     this.screenHeight = opts.screenHeight;
-    this.zoom = opts.zoom ?? 1;
-    this.minZoom = opts.minZoom ?? 0.25;
-    this.maxZoom = opts.maxZoom ?? 4;
+    const fallbackPlay = computePlayZoom(opts.screenWidth, opts.screenHeight);
+    this.playZoom = opts.playZoom ?? fallbackPlay;
+    this.zoom = opts.zoom ?? this.playZoom;
+    // Bounds default to the play zoom so the locked view is also enforced
+    // for any code that calls setZoom — keeps fairness invariants if some
+    // future UI affordance forgets to disable itself.
+    this.minZoom = opts.minZoom ?? this.playZoom;
+    this.maxZoom = opts.maxZoom ?? this.playZoom;
+  }
+
+  /**
+   * Recompute the play zoom for new screen dimensions and snap the active
+   * zoom + bounds to it. Call on resize / orientation change so the play
+   * area stays consistent across devices.
+   */
+  applyPlayZoom(newPlayZoom: number): void {
+    this.playZoom = newPlayZoom;
+    this.zoom = newPlayZoom;
+    this.minZoom = newPlayZoom;
+    this.maxZoom = newPlayZoom;
   }
 
   /** The effective pixel size of a tile at the current zoom level. */
