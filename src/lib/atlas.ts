@@ -2,9 +2,10 @@ import { SPRITE_SIZE } from './spr';
 import type { SprFile } from './spr';
 import { decodeSprite } from './spr';
 import type { DatFile } from './dat';
+import type { Pixel } from './types';
 
 /** Maximum atlas texture dimension (most GPUs support at least 2048). */
-export const ATLAS_SIZE = 2048;
+export const ATLAS_SIZE: Pixel = 2048;
 
 /** Number of sprites per row/column in one atlas page. */
 export const SPRITES_PER_ROW = ATLAS_SIZE / SPRITE_SIZE; // 64
@@ -14,8 +15,8 @@ export const SPRITES_PER_PAGE = SPRITES_PER_ROW * SPRITES_PER_ROW; // 4096
 
 export interface SpriteLocation {
   page: number;
-  x: number;
-  y: number;
+  x: Pixel;
+  y: Pixel;
 }
 
 export type AtlasPages = Map<number, Uint8Array>;

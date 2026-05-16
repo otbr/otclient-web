@@ -5,8 +5,7 @@ import { getCreatureSpriteId, buildCreatureIndex } from './player';
 import type { SpriteLocation } from './atlas';
 import { getSpriteTexture } from './tileRenderer';
 import type { AtlasTextures } from './tileRenderer';
-
-const TILE_SIZE = 32;
+import { TILE_SIZE } from '../constants';
 
 export interface CreatureRenderState {
   container: Container;

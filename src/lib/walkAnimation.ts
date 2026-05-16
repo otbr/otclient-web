@@ -1,7 +1,8 @@
 import type { PlayerState } from './player';
 import { Direction } from './player';
 import type { PathNode } from './pathfinding';
-import { TILE_SIZE } from './tileRenderer';
+import { TILE_SIZE } from '../constants';
+import type { Pixel } from './types';
 
 /** Duration of one tile walk step in milliseconds. */
 export const WALK_DURATION_MS = 200;
@@ -70,7 +71,7 @@ export function updateWalk(
   walk: WalkState,
   player: PlayerState,
   now: number,
-): { offsetX: number; offsetY: number } {
+): { offsetX: Pixel; offsetY: Pixel } {
   if (!walk.active) return { offsetX: 0, offsetY: 0 };
 
   const elapsed = now - walk.startTime;

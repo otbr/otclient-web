@@ -1,4 +1,5 @@
 import { Direction } from './player';
+import type { Pixel } from './types';
 import type { Viewport } from './viewport';
 
 export interface TileCoord {
@@ -10,8 +11,8 @@ export interface TileCoord {
  * Convert a screen pixel position to a tile coordinate using the viewport.
  */
 export function screenToTile(
-  screenX: number,
-  screenY: number,
+  screenX: Pixel,
+  screenY: Pixel,
   viewport: Viewport,
 ): TileCoord {
   const tilePixel = viewport.tileSizeOnScreen;

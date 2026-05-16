@@ -7,8 +7,7 @@ import type { AtlasPages, SpriteLocation } from './atlas';
 import { ATLAS_SIZE } from './atlas';
 import type { PlayerState } from './player';
 import { extractSpritePixels, tintOutfitSprite } from './outfitTint';
-
-export const TILE_SIZE = 32;
+import { TILE_SIZE } from '../constants';
 
 /**
  * Flat index into FrameGroup.spriteIds for a specific frame. Matches the

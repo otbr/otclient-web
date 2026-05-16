@@ -1,7 +1,7 @@
 import { Container, Text, TextStyle } from 'pixi.js';
 import type { ChatManager, SpeechBubble } from './ChatManager';
+import { TILE_SIZE } from '../../constants';
 
-const TILE_SIZE = 32;
 const BUBBLE_STYLE = new TextStyle({
   fontFamily: 'system-ui, sans-serif',
   fontSize: 11,

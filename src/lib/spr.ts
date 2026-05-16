@@ -1,6 +1,7 @@
 import { BinaryReader } from './BinaryReader';
+import type { Pixel } from './types';
 
-export const SPRITE_SIZE = 32;
+export const SPRITE_SIZE: Pixel = 32;
 export const SPRITE_PIXELS = SPRITE_SIZE * SPRITE_SIZE; // 1024
 export const SPRITE_DATA_SIZE = SPRITE_PIXELS * 4; // RGBA bytes
 

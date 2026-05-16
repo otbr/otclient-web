@@ -1,4 +1,6 @@
-const TILE_SIZE = 32;
+import type { Pixel } from './types';
+
+import { TILE_SIZE } from '../constants';
 
 /**
  * Number of horizontal tiles visible at the device's play zoom. Tibia is a
@@ -14,7 +16,7 @@ export const LANDSCAPE_PLAY_TILES_X = 21;
  * this device. Bigger screen → bigger tiles at the same zoom, so all
  * devices see roughly the same play area.
  */
-export function computePlayZoom(screenWidth: number, screenHeight: number): number {
+export function computePlayZoom(screenWidth: Pixel, screenHeight: Pixel): number {
   // Guard against transient zero/negative dimensions during init / orientation
   // change — without this, the result is Infinity or NaN and propagates
   // through every viewport calc.
@@ -42,8 +44,8 @@ export class Viewport {
   zoom: number;
 
   /** Screen dimensions in pixels. */
-  screenWidth: number;
-  screenHeight: number;
+  screenWidth: Pixel;
+  screenHeight: Pixel;
 
   minZoom: number;
   maxZoom: number;
@@ -54,8 +56,8 @@ export class Viewport {
   constructor(opts: {
     centerX: number;
     centerY: number;
-    screenWidth: number;
-    screenHeight: number;
+    screenWidth: Pixel;
+    screenHeight: Pixel;
     zoom?: number;
     minZoom?: number;
     maxZoom?: number;
@@ -88,7 +90,7 @@ export class Viewport {
   }
 
   /** The effective pixel size of a tile at the current zoom level. */
-  get tileSizeOnScreen(): number {
+  get tileSizeOnScreen(): Pixel {
     return TILE_SIZE * this.zoom;
   }
 
@@ -113,7 +115,7 @@ export class Viewport {
   /**
    * Pan the camera by a pixel delta (screen space).
    */
-  pan(dx: number, dy: number): void {
+  pan(dx: Pixel, dy: Pixel): void {
     this.centerX -= dx / this.tileSizeOnScreen;
     this.centerY -= dy / this.tileSizeOnScreen;
   }
@@ -137,7 +139,7 @@ export class Viewport {
    * This positions the tile container so that the camera center
    * is at the screen center.
    */
-  getContainerOffset(): { x: number; y: number } {
+  getContainerOffset(): { x: Pixel; y: Pixel } {
     const tilePixel = this.tileSizeOnScreen;
     return {
       x: this.screenWidth / 2 - this.centerX * tilePixel,

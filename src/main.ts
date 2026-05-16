@@ -8,7 +8,7 @@ import { NODE_END, NODE_START, readNodeData, skipNode } from './lib/nodeTree';
 import { buildAtlasPages, collectReferencedSpriteIds, computeAtlasLayout } from './lib/atlas';
 import { TileMap } from './lib/tileMap';
 import type { Bounds, FloorChange } from './lib/tileMap';
-import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex, TILE_SIZE } from './lib/tileRenderer';
+import { createAtlasTextures, renderTileRegion, renderPlayer, buildDatIndex } from './lib/tileRenderer';
 import type { AnimatedSprite, TintedTextureCache } from './lib/tileRenderer';
 import { Viewport, computePlayZoom } from './lib/viewport';
 import type { ViewRect } from './lib/viewport';
@@ -37,6 +37,7 @@ import type { OtbFile } from './lib/otb';
 import type { OtbmFile, OtbmRegion, Position } from './lib/otbm';
 import type { CompleteLoadedFiles } from './lib/fileLoader';
 import { needsExpansion, needsExpansionForDestination } from './lib/regionExpansion';
+import { TILE_SIZE } from './constants';
 
 // --- File loading UI ---
 

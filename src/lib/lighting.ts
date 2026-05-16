@@ -2,9 +2,10 @@ import { Application, Container, Graphics, RenderTexture, Sprite, Texture } from
 import type { TileMap } from './tileMap';
 import type { ThingType, Light } from './dat';
 import { DatAttr } from './dat';
+import type { Pixel } from './types';
+import { TILE_SIZE } from '../constants';
 
-const TILE_SIZE = 32;
-const MASK_SIZE = 256;
+const MASK_SIZE: Pixel = 256;
 const MAX_INTENSITY = 7;
 
 export interface LightSource {

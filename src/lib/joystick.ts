@@ -1,4 +1,5 @@
 import { Direction } from './player';
+import type { Pixel } from './types';
 
 export interface JoystickHandle {
   /** The base DOM element. Attached to the parent in `createJoystick`. */
@@ -17,8 +18,8 @@ export interface JoystickOptions {
   onChange: (dir: Direction | null) => void;
 }
 
-const BASE_SIZE_PX = 120;
-const KNOB_SIZE_PX = 50;
+const BASE_SIZE_PX: Pixel = 120;
+const KNOB_SIZE_PX: Pixel = 50;
 const DEAD_ZONE_FRACTION = 0.35;
 // How much the dominant axis must exceed the secondary axis (as a ratio)
 // before a direction change is accepted. Prevents accidental flips when
@@ -35,9 +36,9 @@ const AXIS_DOMINANCE_RATIO = 1.5;
  * Pass `null` for the initial press.
  */
 export function directionFromKnob(
-  dx: number,
-  dy: number,
-  radius: number,
+  dx: Pixel,
+  dy: Pixel,
+  radius: Pixel,
   currentDir: Direction | null = null,
   deadZoneFraction = DEAD_ZONE_FRACTION,
 ): Direction | null {
@@ -125,7 +126,7 @@ export function createJoystick(opts: JoystickOptions): JoystickHandle {
   let baseRect: DOMRect | null = null;
   let currentDir: Direction | null = null;
 
-  function setKnob(dx: number, dy: number) {
+  function setKnob(dx: Pixel, dy: Pixel) {
     knob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
   }
 
@@ -141,7 +142,7 @@ export function createJoystick(opts: JoystickOptions): JoystickHandle {
   }
 
   /** Compute clamped knob displacement from a pointer event. */
-  function knobDelta(e: PointerEvent): { dx: number; dy: number; r: number } | null {
+  function knobDelta(e: PointerEvent): { dx: Pixel; dy: Pixel; r: Pixel } | null {
     if (!baseRect) return null;
     const cx = baseRect.left + baseRect.width / 2;
     const cy = baseRect.top + baseRect.height / 2;
