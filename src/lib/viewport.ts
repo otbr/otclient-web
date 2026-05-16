@@ -6,7 +6,7 @@ const TILE_SIZE = 32;
  * same play area. Pulled back a bit from the classic 15×11 to maximise
  * situational awareness on mobile.
  */
-export const PORTRAIT_PLAY_TILES_X = 17;
+export const PORTRAIT_PLAY_TILES_X = 11;
 export const LANDSCAPE_PLAY_TILES_X = 21;
 
 /**
