@@ -12,8 +12,7 @@
     "audit:ci": "npm audit --audit-level=high",
     "test": "vitest run",
     "test:watch": "vitest",
-    "proxy": "npx tsx proxy/server.ts",
-    "build:icons": "node scripts/build-icons.mjs"
+    "proxy": "npx tsx proxy/server.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
