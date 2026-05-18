@@ -30,6 +30,7 @@ import {
   type LightingOptions,
 } from './lib/lighting';
 import { createFileLoader } from './lib/fileLoader';
+import { tryAutoload } from './lib/assetAutoload';
 import type { RenderTexture } from 'pixi.js';
 import type { DatFile } from './lib/dat';
 import type { SprFile } from './lib/spr';
@@ -59,12 +60,37 @@ function addFileToList(name: string) {
   fileListEl.appendChild(li);
 }
 
+// Shared boot guard: autoload and manual upload both feed startApp, and
+// nothing stops a user from dropping files while autoload's fetches are
+// still in flight. Wrap startApp so whichever path completes first wins;
+// the other becomes a no-op. Without this, both paths can init Pixi twice
+// (duplicate canvas, listeners, workers).
+//
+// Reset on throw so a failed autoload (corrupt/incompatible assets) doesn't
+// permanently block the manual upload retry path.
+let bootStarted = false;
+async function startAppOnce(loaded: CompleteLoadedFiles): Promise<void> {
+  if (bootStarted) return;
+  bootStarted = true;
+  try {
+    await startApp(loaded);
+  } catch (e) {
+    bootStarted = false;
+    throw e;
+  }
+}
+
 const handleFiles = createFileLoader({
   setStatus,
   addFileToList,
-  startApp,
+  startApp: startAppOnce,
   onError: console.error,
 });
+
+// Attempt to auto-load assets from a per-version folder under public/.
+// Silently no-ops if the folder/files aren't there, leaving the manual
+// upload UI below as the fallback. See src/lib/assetAutoload.ts.
+tryAutoload({ onStatus: setStatus, addFileToList, startApp: startAppOnce }).catch(console.error);
 
 // Drag and drop
 dropZone.addEventListener('dragover', (e) => {
