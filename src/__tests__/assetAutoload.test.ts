@@ -127,8 +127,53 @@ describe('tryAutoload', () => {
 
     expect(ok).toBe(false);
     expect(opts.startApp).not.toHaveBeenCalled();
-    // Silent fallback: no "Auto-loaded…" text should leak through.
-    expect(opts.onStatus).not.toHaveBeenCalled();
+    // User set up a manifest but is missing a file — they want to know which
+    // one. The final status call should be an isError=true message naming it.
+    const lastCall = opts.onStatus.mock.calls.at(-1);
+    expect(lastCall?.[0]).toContain('items.otb');
+    expect(lastCall?.[1]).toBe(true);
+  });
+
+  it('emits a Loading status as soon as the manifest is validated', async () => {
+    let resolveDat: (r: Response) => void = () => {};
+    const datPromise = new Promise<Response>(r => { resolveDat = r; });
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('manifest.json')) return Promise.resolve(jsonResponse(VALID_MANIFEST));
+      if (url.endsWith('Tibia.dat')) return datPromise;
+      return Promise.resolve(bufResponse(0));
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    const opts = makeOptions();
+
+    const run = tryAutoload(opts);
+    // Yield until the manifest microtasks complete and onStatus fires,
+    // before the .dat fetch resolves.
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(opts.onStatus).toHaveBeenCalled();
+    expect(opts.onStatus.mock.calls[0][0]).toMatch(/loading/i);
+
+    resolveDat(bufResponse(1));
+    await run;
+  });
+
+  it('reports an error status when fetch rejects after manifest succeeds', async () => {
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url.endsWith('manifest.json')) return Promise.resolve(jsonResponse(VALID_MANIFEST));
+      // All asset fetches throw — simulates network failure, CORS, abort.
+      return Promise.reject(new TypeError('NetworkError'));
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    const opts = makeOptions();
+
+    const ok = await tryAutoload(opts);
+
+    expect(ok).toBe(false);
+    expect(opts.startApp).not.toHaveBeenCalled();
+    const lastCall = opts.onStatus.mock.calls.at(-1);
+    expect(lastCall?.[1]).toBe(true);
+    expect(lastCall?.[0]).toMatch(/could not load/i);
   });
 
   it('targets the version folder from ?version=<v>', async () => {
