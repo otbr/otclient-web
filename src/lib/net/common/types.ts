@@ -1,6 +1,5 @@
 import type { InputPacket } from './InputPacket';
 import type { OutputPacket } from './OutputPacket';
-import type { XteaKey } from './xtea';
 
 // ─── Shape types (data shapes exchanged with callers) ──────────────────────
 
@@ -159,27 +158,50 @@ export interface ProtocolConfig {
    * a real RSA gate will land alongside an implementation in a later PR.
    */
   useRSA: boolean;
-  /** Whether subsequent game packets are XTEA-encrypted. Enforced by GameClient. */
+  /** Whether game packets are XTEA-encrypted. Enforced by GameClient. OT 7.6 has no XTEA. */
   useXTEA: boolean;
+  /**
+   * U32 signatures for Tibia.dat / Tibia.spr / Tibia.pic that 7.6 servers
+   * may validate against the client's claimed asset versions. Defaults to
+   * zeros — jamera and some forks ignore them. Real values should be
+   * plumbed in from the asset loaders.
+   */
+  datSignature?: number;
+  sprSignature?: number;
+  picSignature?: number;
 }
 
 // ─── Sub-protocol interfaces ───────────────────────────────────────────────
 
 export interface LoginProtocol {
-  buildLoginRequest(accountNumber: number, password: string, xteaKey: XteaKey): OutputPacket;
-  buildGameLogin(accountNumber: number, characterName: string, password: string, xteaKey: XteaKey): OutputPacket;
+  buildLoginRequest(accountNumber: number, password: string): OutputPacket;
+  buildGameLogin(accountNumber: number, characterName: string, password: string): OutputPacket;
   parseLoginResponse(packet: InputPacket): LoginResponse | LoginError;
   isLoginError(response: LoginResponse | LoginError): response is LoginError;
 }
 
 export interface MapProtocol {
+  /**
+   * Consume the 5-byte position prefix `(U16 x, U16 y, U8 z)` that the
+   * server prepends to the initial map description (opcode 0x64). Movement
+   * updates (opcodes 0x65–0x68) do not carry this prefix — only call this
+   * for the initial frame.
+   */
+  parsePosition(packet: InputPacket): { x: number; y: number; z: number };
+
+  /**
+   * Parse a rectangular map region across all currently-visible floors,
+   * based on `playerZ` (the server sends 8 layers above ground or 5
+   * layers underground). A single skip counter carries tiles across
+   * floor boundaries — do not call this once per floor.
+   */
   parseDescription(
     packet: InputPacket,
     startX: number,
     startY: number,
     endX: number,
     endY: number,
-    z: number,
+    playerZ: number,
   ): MapTile[];
 }
 
