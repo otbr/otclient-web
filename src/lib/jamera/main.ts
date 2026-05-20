@@ -4,6 +4,7 @@ import { OutputPacket } from '../net/common/OutputPacket';
 import { ClientOp } from '../net/7.6/opcodes';
 import { tryAutoload } from '../assetAutoload';
 import type { CompleteLoadedFiles } from '../fileLoader';
+import { GameWorld } from '../GameWorld';
 
 const root = document.getElementById('jamera-root');
 if (!root) {
@@ -32,8 +33,34 @@ mountLoginScreen(root, {
     }
     startPingLoop(client);
     loadAssetsForRendering();
+    bindGameWorld(client);
   },
 });
+
+/**
+ * Spin up a GameWorld and register its handlers on the client's
+ * dispatcher so server map / creature packets land in a live state
+ * object. **Data-binding only — nothing is rendered yet.** The
+ * renderer that consumes this state is a separate follow-up PR.
+ *
+ * Always builds a fresh GameWorld per in_game transition: a disconnect
+ * + re-login on the same page would otherwise reuse the previous
+ * session's stale tile/creature state, AND we *want* the new
+ * registration to land — `PacketDispatcher.on()` is a Map.set, so
+ * overwriting the previous closure's handler is exactly the right
+ * thing here.
+ */
+function bindGameWorld(client: GameClient): void {
+  const world = new GameWorld(client.getProtocol());
+  world.registerHandlers(client.getDispatcher());
+  console.info('[jamera] GameWorld bound to dispatcher (data-only, no rendering yet)');
+  if (import.meta.env.DEV) {
+    // Dev-only DevTools hook so we can inspect live tiles / creatures /
+    // player position while the renderer PR is being built. Replaced on
+    // each re-login so the reference always points at the live world.
+    (window as unknown as { jameraWorld: GameWorld }).jameraWorld = world;
+  }
+}
 
 /**
  * Background-load the asset bundle (.dat / .spr / .otb / .otbm) the
