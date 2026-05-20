@@ -1,6 +1,9 @@
 <style>
   .jamera-login {
-    position: fixed; inset: 0;
+    /* Explicit z-index above the PIXI canvas (which is appended later to
+       document.body with z-index: 0). Both are position: fixed at the
+       root, so without this the canvas would paint on top by DOM order. */
+    position: fixed; inset: 0; z-index: 10;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 1rem;
     background: #1a1a2e; color: #e0e0e0;
