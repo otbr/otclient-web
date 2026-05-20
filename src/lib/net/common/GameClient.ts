@@ -2,6 +2,7 @@ import { Connection } from './Connection';
 import { PacketDispatcher } from './PacketDispatcher';
 import { generateXteaKey, type XteaKey } from './xtea';
 import type { InputPacket } from './InputPacket';
+import type { OutputPacket } from './OutputPacket';
 import type {
   GameProtocol,
   CharacterInfo,
@@ -128,6 +129,26 @@ export class GameClient {
     this.loginConn.disconnect();
     this.gameConn?.disconnect();
     this.setState('disconnected');
+  }
+
+  /**
+   * Send a packet to the game server. Throws if not currently `in_game`
+   * — silent no-ops would hide the most common caller bug (firing
+   * packets before the login handshake completes). Honours
+   * `protocol.config.useXTEA` so 8.x implementations get encrypted
+   * payloads automatically.
+   */
+  send(packet: OutputPacket): void {
+    if (this.state !== 'in_game') {
+      throw new Error(`Cannot send packet: client state is ${this.state}`);
+    }
+    if (!this.gameConn) {
+      // Defense in depth: the state machine guarantees gameConn is set
+      // whenever state is in_game, but spelling out a distinct error
+      // makes any future state/connection desync easier to spot.
+      throw new Error('Cannot send packet: game connection is not initialized');
+    }
+    this.gameConn.send(packet, this.protocol.config.useXTEA);
   }
 
   private handleLoginResponse(packet: InputPacket): void {
