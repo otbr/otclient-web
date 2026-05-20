@@ -2,6 +2,8 @@ import { mountLoginScreen } from './loginScreen';
 import type { GameClient } from '../net/common/GameClient';
 import { OutputPacket } from '../net/common/OutputPacket';
 import { ClientOp } from '../net/7.6/opcodes';
+import { tryAutoload } from '../assetAutoload';
+import type { CompleteLoadedFiles } from '../fileLoader';
 
 const root = document.getElementById('jamera-root');
 if (!root) {
@@ -29,8 +31,55 @@ mountLoginScreen(root, {
       console.info('[jamera] in_game — client attached locally (suppressed from window in prod)');
     }
     startPingLoop(client);
+    loadAssetsForRendering();
   },
 });
+
+/**
+ * Background-load the asset bundle (.dat / .spr / .otb / .otbm) the
+ * upcoming renderer PR will need. Uses the existing `tryAutoload` from
+ * `assetAutoload.ts` so the jamera flow shares the same source-of-truth
+ * resolution (`?version=…` + `public/assets/<version>/`) as the offline
+ * demo.
+ *
+ * Module-scoped guards prevent re-fetching the (large) bundle on every
+ * re-login or overlapping in-flight requests — assets only need to load
+ * once per page load.
+ *
+ * No fallback drag-drop UI here — if auto-load fails we just log it and
+ * let the renderer PR decide what to surface. The drag-drop fallback is
+ * its own tiny follow-up PR.
+ */
+let assetsLoading = false;
+let assetsLoaded = false;
+
+function loadAssetsForRendering(): void {
+  if (assetsLoaded || assetsLoading) return;
+  assetsLoading = true;
+  tryAutoload({
+    onStatus: (msg, isError) => {
+      if (isError) console.warn('[jamera-assets]', msg);
+      else console.info('[jamera-assets]', msg);
+    },
+    addFileToList: (name) => console.info('[jamera-assets] loaded', name),
+    startApp: async (loaded: CompleteLoadedFiles) => {
+      assetsLoaded = true;
+      console.info('[jamera] assets ready (dat/spr/otb/otbm)');
+      if (import.meta.env.DEV) {
+        // Dev-only DevTools hook so the renderer PR can poke at the
+        // parsed assets while it's being built. Not exposed in prod for
+        // the same reason as window.jameraClient.
+        (window as unknown as { jameraAssets: CompleteLoadedFiles }).jameraAssets = loaded;
+      }
+    },
+  })
+    .catch((err) => {
+      console.warn('[jamera] asset auto-load failed:', (err as Error).message);
+    })
+    .finally(() => {
+      assetsLoading = false;
+    });
+}
 
 /**
  * Keep-alive + end-to-end send() smoke test. Tibia 7.6 servers expect
